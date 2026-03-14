@@ -538,6 +538,11 @@ export const leaveBountyReview = async (bountyId: string, rating: number, commen
     return res.data;
 };
 
+export const deleteBountyById = async (bountyId: string): Promise<{ success: boolean }> => {
+    const res = await api.delete(`/bounties/${bountyId}`);
+    return res.data;
+};
+
 // --- Social Feed (Real Backend) ---
 
 export const fetchNetworkFeed = async (tag?: string): Promise<SocialFeedPost[]> => {

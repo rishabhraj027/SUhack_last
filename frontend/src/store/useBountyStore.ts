@@ -5,7 +5,7 @@ import {
     requestPocFromStudent, respondToPocRequest, submitPocWork,
     awardBidToStudent, addBountyMilestone, updateBountyMilestone,
     resubmitBountyProject, requestBountyRevision,
-    approveBountySubmission, leaveBountyReview,
+    approveBountySubmission, leaveBountyReview, deleteBountyById,
 } from '../services/api';
 import type { Bounty, CreateBountyPayload, Milestone } from '../services/api';
 
@@ -29,6 +29,7 @@ interface BountyState {
     submitPoc: (bountyId: string, studentId: string, link: string, screenshotUrl?: string) => Promise<void>;
     addMilestone: (bountyId: string, title: string, description?: string) => Promise<void>;
     updateMilestoneStatus: (bountyId: string, milestoneId: string, status: Milestone['status']) => Promise<void>;
+    deleteBounty: (bountyId: string) => Promise<void>;
 }
 
 // Helper: replace a bounty in the list with an updated one from the API
@@ -197,6 +198,16 @@ export const useBountyStore = create<BountyState>()((set) => ({
         try {
             const updated = await updateBountyMilestone(bountyId, milestoneId, status);
             set((state) => ({ bounties: replaceBounty(state.bounties, updated), isLoading: false }));
+        } catch (err: unknown) {
+            set({ error: err instanceof Error ? err.message : String(err), isLoading: false });
+        }
+    },
+
+    deleteBounty: async (bountyId) => {
+        set({ isLoading: true, error: null });
+        try {
+            await deleteBountyById(bountyId);
+            set((state) => ({ bounties: state.bounties.filter(b => b.id !== bountyId), isLoading: false }));
         } catch (err: unknown) {
             set({ error: err instanceof Error ? err.message : String(err), isLoading: false });
         }

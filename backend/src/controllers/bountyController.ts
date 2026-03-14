@@ -95,11 +95,21 @@ export async function getBounties(req: Request, res: Response): Promise<void> {
     const role = (req as any).user.role;
     const status = req.query.status as string | undefined;
 
+    // Exclude expired bounties with no bids (OPEN + deadline passed)
+    const notExpiredNoBid = {
+      NOT: {
+        AND: [
+          { deadline: { not: null, lt: new Date() } },
+          { status: 'OPEN' },
+        ],
+      },
+    };
+
     let where: any = {};
 
     if (role === 'Business') {
       // Business users only see their own bounties
-      where.founderId = userId;
+      where = { ...notExpiredNoBid, founderId: userId };
       if (status) where.status = status;
     } else {
       // JuniorPro: see OPEN/BIDDING (discovery) + bounties they've bid on or are assigned to
@@ -109,9 +119,9 @@ export async function getBounties(req: Request, res: Response): Promise<void> {
         { claimedById: userId },
       ];
       if (status) {
-        where = { AND: [{ status }, { OR: orClause }] };
+        where = { AND: [notExpiredNoBid, { status }, { OR: orClause }] };
       } else {
-        where = { OR: orClause };
+        where = { AND: [notExpiredNoBid, { OR: orClause }] };
       }
     }
 
@@ -120,6 +130,15 @@ export async function getBounties(req: Request, res: Response): Promise<void> {
       include: bountyInclude,
       orderBy: { createdAt: 'desc' },
     });
+
+    // Also clean up: delete expired no-bid bounties in the background
+    prisma.bounty.deleteMany({
+      where: {
+        status: 'OPEN',
+        deadline: { not: null, lt: new Date() },
+      },
+    }).catch((err) => console.error('[cleanup expired bounties]', err));
+
     res.json(bounties.map(mapBounty));
   } catch (err) {
     console.error('[getBounties]', err);
@@ -180,6 +199,10 @@ export async function placeBid(req: Request, res: Response): Promise<void> {
     if (bounty.founderId === userId) { res.status(403).json({ error: 'Cannot bid on your own bounty' }); return; }
     if (bounty.status !== 'OPEN' && bounty.status !== 'BIDDING') {
       res.status(400).json({ error: 'Bounty is not open for bidding' });
+      return;
+    }
+    if (bounty.deadline && new Date(bounty.deadline) < new Date()) {
+      res.status(400).json({ error: 'Bounty deadline has passed' });
       return;
     }
 
@@ -636,5 +659,36 @@ export async function leaveReview(req: Request, res: Response): Promise<void> {
   } catch (err) {
     console.error('[leaveReview]', err);
     res.status(500).json({ error: 'Failed to leave review' });
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 17. DELETE /api/bounties/:id
+// ══════════════════════════════════════════════════════════════════════
+export async function deleteBounty(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = (req as any).user.userId;
+    const bountyId = req.params.id as string;
+
+    const bounty = await prisma.bounty.findUnique({ where: { id: bountyId } });
+    if (!bounty) { res.status(404).json({ error: 'Bounty not found' }); return; }
+    if (bounty.founderId !== userId) { res.status(403).json({ error: 'Not authorized' }); return; }
+    if (bounty.status !== 'OPEN' && bounty.status !== 'BIDDING') {
+      res.status(400).json({ error: 'Cannot delete a bounty that has already been awarded' });
+      return;
+    }
+
+    // Delete related bids, milestones, feedbacks first, then the bounty
+    await prisma.$transaction([
+      prisma.bid.deleteMany({ where: { bountyId } }),
+      prisma.milestone.deleteMany({ where: { bountyId } }),
+      prisma.bountyFeedback.deleteMany({ where: { bountyId } }),
+      prisma.bounty.delete({ where: { id: bountyId } }),
+    ]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[deleteBounty]', err);
+    res.status(500).json({ error: 'Failed to delete bounty' });
   }
 }

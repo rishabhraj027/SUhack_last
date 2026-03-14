@@ -3,6 +3,7 @@ import { authenticate } from '../middleware/auth.js';
 import {
   getBounties,
   createBounty,
+  deleteBounty,
   placeBid,
   founderCounter,
   respondToCounter,
@@ -24,6 +25,7 @@ const router = Router();
 // Bounty CRUD
 router.get('/', authenticate, getBounties);
 router.post('/', authenticate, createBounty);
+router.delete('/:id', authenticate, deleteBounty);
 
 // Bidding
 router.post('/:id/bids', authenticate, placeBid);
